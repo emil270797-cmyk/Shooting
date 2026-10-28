@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Тир VK</title>
+<script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+<style>
+:root{--bg:#1a1410;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e0b08}}
+:root[data-theme="dark"]{--bg:#0e0b08}
+html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;touch-action:none}
+body{display:flex;align-items:center;justify-content:center}
+canvas{display:block;touch-action:none;cursor:none;user-select:none;-webkit-user-select:none}
+</style>
+</head>
+<body><canvas id="c"></canvas>
+<script>
+const cv=document.getElementById('c'),g=cv.getContext('2d'),W=400,H=640;cv.width=W;cv.height=H;
+function fit(){const s=Math.min(innerWidth/W,(innerHeight-(window.visualViewport?0:0))/H);cv.style.width=W*s+'px';cv.style.height=H*s+'px'}
+addEventListener('resize',fit);fit();
+
+// Инициализация VK Bridge
+vkBridge.send('VKWebAppInit');
+
+let save={stars:[],coins:0,own:[1,0,0,0],up:[0,0],bo:[1,0,0,0],b:0,so:[1,0,0,0],s:0,best:[],th:0,ts:0};
+
+// Загрузка сохранений из ВК
+vkBridge.send("VKWebAppStorageGet", { keys: ["tir_save"] }).then(data => {
+    if (data.keys && data.keys[0].value) {
+        try {
+            const s = JSON.parse(data.keys[0].value);
+            if (s && s.stars) save = Object.assign(save, s);
+        } catch(e) {}
+    }
+});
+
+// Сохранение в ВК
+function persist(){
+    try {
+        vkBridge.send("VKWebAppStorageSet", {
+            key: "tir_save",
+            value: JSON.stringify(save)
+        });
+    } catch (e) {}
+}
+
+const WP=[
+{n:'ПМ',mag:8,cd:.28,auto:0,rl:1.3,rec:16,pel:0,spr:0,f:3500,o:140,d:.18,v:.7,un:0},
+{n:'Дробовик',mag:6,cd:.75,auto:0,rl:2.3,rec:34,pel:1,spr:0,f:1800,o:70,d:.45,v:1,un:2},
+{n:'АК',mag:30,cd:.1,auto:1,rl:2.1,rec:6,pel:0,spr:9,f:2600,o:100,d:.2,v:.8,un:4},
+{n:'СВД',mag:5,cd:1,auto:0,rl:2.6,rec:38,pel:0,spr:0,f:5000,o:90,d:.9,v:.9,un:6,sn:1}];
+
+/* ---- sound (synthesized) ---- */
+let ac,nb;
+function ainit(){if(ac){ac.resume&&ac.resume();return}try{ac=new(window.AudioContext||window.webkitAudioContext)();nb=ac.createBuffer(1,ac.sampleRate,ac.sampleRate);const d=nb.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}catch(e){}}
+function noise(f,d,v,ty,t0){if(!ac)return;const s=ac.createBufferSource();s.buffer=nb;const fl=ac.createBiquadFilter();fl.type=ty||'lowpass';fl.frequency.value=f;const gn=ac.createGain(),t=ac.currentTime+(t0||0);gn.gain.setValueAtTime(v,t);gn.gain.exponentialRampToValueAtTime(.001,t+d);s.connect(fl);fl.connect(gn);gn.connect(ac.destination);s.start(t);s.stop(t+d+.05)}
+function boom(o,d,v){if(!ac)return;const os=ac.createOscillator(),gn=ac.createGain(),t=ac.currentTime;os.frequency.setValueAtTime(o*2,t);os.frequency.exponentialRampToValueAtTime(35,t+d);gn.gain.setValueAtTime(v,t);gn.gain.exponentialRampToValueAtTime(.001,t+d);os.connect(gn);gn.connect(ac.destination);os.start(t);os.stop(t+d+.05)}
+function sShot(w){noise(w.f,w.d,w.v);noise(9000,.03,w.v*.8,'highpass');boom(w.o,w.d*.7,w.v);if(w.sn)noise(900,1.1,.25,'lowpass',.12);else noise(700,.3,.12,'lowpass',.08)}
+function click(t){noise(4000,.04,.5,'highpass',t||0)}
+function sHit(){boom(600,.08,.15)}
+
+/* ---- state ---- */
+let coinGain=0,note='',sc='menu',lv=0,wi=0,T=[],P=[],X=[],score=0,time=0,mult=1,combo=0,hits=0,shots=0,ammo=0,rl=0,cdT=0,spT=0,rec=0,fl=0,shake=0,mx=200,my=300,down=false,win=false,stars=0,cfg;
+const NL=30;let menuPage=0;
+const LC=i=>({time:45,goal:i<10?250+i*90:1060+(i-9)*50,spd:Math.min(320,70+i*20),iv:Math.max(.3,1.3-i*.09),civ:i>=2?Math.min(.35,.12+i*.02):0});
+const unl=i=>i==0||(save.stars[i-1]||0)>0;
+
+function start(i){lv=i;cfg=LC(i);if(!save.own[wi])wi=0;T=[];P=[];X=[];score=0;time=cfg.time+save.up[0]*5;mult=1;combo=0;hits=0;shots=0;ammo=WP[wi].mag;rl=0;cdT=0;spT=0;rec=0;sc='play'}
+function pick(i){if(save.own[i]&&i!=wi){wi=i;ammo=WP[i].mag;rl=0;cdT=.2;rec=0;click()}}
+function reload(){const w=WP[wi];if(rl>0||ammo==w.mag)return;rl=w.rl*(1-.15*save.up[1]);click();click(rl-.15)}
+function txt(s,x,y,c){X.push({s,x,y,c,t:1})}
+function shoot(){const w=WP[wi];if(rl>0||cdT>0)return;if(ammo<=0){click();reload();return}
+ammo--;cdT=w.cd;shots++;sShot(w);fl=.08;shake=Math.max(shake,w.rec/5);
+const ax=mx+(Math.random()-.5)*w.spr*2,ay=my-rec+(Math.random()-.5)*w.spr*2;rec=Math.min(60,rec+w.rec);
+let any=false;
+for(let i=T.length-1;i>=0;i--){const t=T[i],d=Math.hypot(t.x-ax,t.y-ay);
+if(d<=t.r+(w.pel?34:0)){any=true;
+if(t.k=='civ'){score-=50;combo=0;mult=1;shake=10;txt('−50',t.x,t.y,'#ff6b6b')}
+else{let p=w.pel?8:Math.round(5+Math.max(0,1-d/t.r)*15);if(t.k=='bonus')p*=3;if(w.sn&&d<t.r*.35)p*=2;
+combo=Math.min(12,combo+1);mult=1+Math.floor(combo/3);p*=mult;score+=p;hits++;txt('+'+p,t.x,t.y,'#ffd54a');sHit()}
+for(let j=0;j<10;j++)P.push({x:t.x,y:t.y,vx:(Math.random()-.5)*220,vy:(Math.random()-.8)*220,t:.5,c:t.k=='civ'?'#3a7bd5':'#e53935'});
+T.splice(i,1);if(!w.pel)break}}
+if(!any){const pm=mult;combo=0;mult=1;if(pm>1)txt('x1',mx,my-rec-20,'#ff8a65')}
+if(ammo<=0)reload()}
+
+function end(){
+    win=score>=cfg.goal;
+    stars=!win?0:score>=cfg.goal*2?3:score>=cfg.goal*1.5?2:1;
+    coinGain=win?Math.floor(score/10)+stars*5:0;
+    save.coins+=coinGain;
+    if(stars>(save.stars[lv]||0))save.stars[lv]=stars;
+    if(win)save.best[lv]=Math.max(save.best[lv]||0,score);
+    save.th+=hits;save.ts+=shots;
+    persist();
+    
+    // Вызов межстраничной рекламы ВК
+    vkBridge.send("VKWebAppShowNativeAds", { ad_format: "interstitial" })
+        .then(() => { sc = 'end'; })
+        .catch(() => { sc = 'end'; });
+}
+
+const LY=[190,300,410];
+function update(dt){if(sc!='play')return;
+time-=dt;if(time<=0){time=0;end();return}
+cdT=Math.max(0,cdT-dt);rec=Math.max(0,rec-dt*70);fl=Math.max(0,fl-dt);shake=Math.max(0,shake-dt*40);
+if(rl>0){rl-=dt;if(rl<=0){rl=0;ammo=WP[wi].mag}}
+if(down&&WP[wi].auto&&my<588)shoot();
+spT-=dt;if(spT<=0){spT=cfg.iv*(.7+Math.random()*.6);const ln=Math.floor(Math.random()*3),dir=Math.random()<.5?1:-1,r=Math.random();
+let k='round',rad=Math.max(12,24-lv*.6),sp=cfg.spd*(.8+Math.random()*.5);
+if(Math.random()<cfg.civ){k='civ';rad=22}else if(r<.12){k='bonus';rad=12;sp*=1.7}
+T.push({k,r:rad,x:dir>0?-30:W+30,y:LY[ln],vx:dir*sp,ph:Math.random()*6})}
+for(const t of T)t.x+=t.vx*dt;T=T.filter(t=>t.x>-50&&t.x<W+50);
+for(const p of P){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=500*dt;p.t-=dt}P=P.filter(p=>p.t>0);
+for(const x of X){x.y-=40*dt;x.t-=dt}X=X.filter(x=>x.t>0)}
+
+/* ---- drawing ---- */
+function T2(s,x,y,sz,c,al){g.fillStyle=c||'#f4e9d8';g.font='bold '+sz+'px sans-serif';g.textAlign=al||'center';g.textBaseline='middle';g.fillText(s,x,y)}
+function btn(x,y,w,h,c){g.fillStyle=c;g.fillRect(x,y,w,h);g.strokeStyle='rgba(255,255,255,.25)';g.strokeRect(x+.5,y+.5,w,h)}
+function bg(){const gr=g.createLinearGradient(0,0,0,H);gr.addColorStop(0,BG[save.b].a);gr.addColorStop(1,BG[save.b].b);g.fillStyle=gr;g.fillRect(0,0,W,H);
+const k=save.b;if(k==0){g.fillStyle='rgba(0,0,0,.18)';for(let i=0;i<H;i+=24)g.fillRect(0,i,W,2)}
+else if(k==1){g.fillStyle='#fff';for(let i=0;i<40;i++)g.fillRect((i*97)%W,(i*53)%(H-60),2,2)}
+else if(k==2){g.fillStyle='#ffe082';g.beginPath();g.arc(320,95,40,0,7);g.fill()}
+else{g.strokeStyle='rgba(213,0,249,.25)';g.lineWidth=1;for(let i=0;i<W;i+=40){g.beginPath();g.moveTo(i,0);g.lineTo(i,H);g.stroke()}for(let i=0;i<H;i+=40){g.beginPath();g.moveTo(0,i);g.lineTo(W,i);g.stroke()}}}
+function target(t){const s=t.k;g.save();g.translate(t.x,t.y);
+g.fillStyle='#555';g.fillRect(-2,t.r,4,30-t.r+6);
+if(s=='civ'){g.fillStyle='#3a7bd5';g.beginPath();g.arc(0,0,t.r,0,7);g.fill();g.fillStyle='#fff';g.fillRect(-9,-3,18,6);g.fillRect(-3,-9,6,18);g.strokeStyle='#fff';g.lineWidth=2;g.stroke()}
+else{const cs=s=='bonus'?['#ffd54a','#fff','#ffb300']:['#e53935','#fff','#e53935','#fff','#b71c1c'];
+for(let i=0;i<cs.length;i++){g.fillStyle=cs[i];pth(t.r*(1-i/cs.length));g.fill()}
+g.strokeStyle='#222';g.lineWidth=1.5;pth(t.r);g.stroke()}
+g.restore()}
+function hud(){g.fillStyle='rgba(0,0,0,.45)';g.fillRect(0,0,W,50);
+T2('Очки '+score+' / '+cfg.goal,10,17,15,'#f4e9d8','left');T2('Уровень '+(lv+1),10,37,12,'#c9b79c','left');
+T2(Math.ceil(time)+' с',W/2,25,24,time<10?'#ff6b6b':'#f4e9d8');
+T2('x'+mult,W-12,17,18,'#ffd54a','right');T2('точность '+(shots?Math.round(hits/shots*100):0)+'%',W-12,37,11,'#c9b79c','right');
+g.fillStyle='#2b1d12';g.fillRect(0,588,W,52);
+T2(WP[wi].n,14,614,16,'#f4e9d8','left');
+btn(100,596,290,36,rl>0?'#7a3b2b':'#355e3b');T2(rl>0?'Перезарядка...':'Патроны '+ammo+'/'+WP[wi].mag+' · тап — перезарядка',245,614,13);
+if(rl>0){g.fillStyle='#ffd54a';g.fillRect(10,584,Math.max(0,1-rl/(WP[wi].rl*(1-.15*save.up[1])))*380,3)}}
+function draw(){g.setTransform(1,0,0,1,0,0);bg();if(sc=='pre'){drawPre();cur();return}if(sc=='shop'||sc=='tasks'){drawSub();cur();return}
+if(sc=='menu'){T2('ТИР',W/2,90,56,'#ffd54a');T2('Стреляй по мишеням, не трогай синих',W/2,140,14,'#c9b79c');
+T2('Выбери уровень',W/2,200,18);
+for(let k=0;k<10;k++){const i=menuPage*10+k,x=30+(k%5)*70,y=240+Math.floor(k/5)*85,ok=unl(i);btn(x,y,60,70,ok?'#6a4526':'#241912');T2(i+1,x+30,y+26,26,ok?'#f4e9d8':'#5d4f40');
+T2(ok?'★'.repeat(save.stars[i]||0)+'☆'.repeat(3-(save.stars[i]||0)):'🔒',x+30,y+54,11,'#ffd54a')}
+T2('Монеты: '+save.coins,W-14,24,18,'#ffd54a','right');btn(30,408,70,36,menuPage>0?'#4a3320':'#241912');T2('◀',65,426,16);btn(300,408,70,36,menuPage<NL/10-1?'#4a3320':'#241912');T2('▶',335,426,16);T2('Уровни '+(menuPage*10+1)+'–'+(menuPage*10+10),W/2,426,14,'#c9b79c');btn(30,470,160,56,'#6a4526');T2('Магазин',110,498,20);btn(210,470,160,56,'#355e3b');T2('Задания',290,498,20);btn(30,534,340,48,'#3a4f7a');T2('Рейтинг',200,558,20);T2('Звук выстрелов синтезируется в браузере',W/2,614,12,'#8a7a66');
+cur();return}
+g.save();if(shake>0)g.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);
+for(const y of LY){g.fillStyle=BG[save.b].sh;g.fillRect(0,y+32,W,8);g.fillStyle='#2a1c10';g.fillRect(0,y+40,W,3)}
+for(const t of T)target(t);
+for(const p of P){g.fillStyle=p.c;g.fillRect(p.x,p.y,4,4)}
+for(const x of X){g.globalAlpha=Math.max(0,x.t);T2(x.s,x.x,x.y,18,x.c);g.globalAlpha=1}
+g.restore();
+if(fl>0){g.fillStyle='rgba(255,220,150,'+fl*3+')';g.fillRect(0,0,W,H)}
+hud();
+if(sc=='end'){g.fillStyle='rgba(0,0,0,.75)';g.fillRect(0,0,W,H);
+T2(win?'Уровень пройден!':'Не хватило очков',W/2,200,28,win?'#ffd54a':'#ff6b6b');
+T2('★'.repeat(stars)+'☆'.repeat(3-stars),W/2,250,34,'#ffd54a');
+T2('Очки: '+score+' из '+cfg.goal,W/2,300,18);T2('Точность: '+(shots?Math.round(hits/shots*100):0)+'%',W/2,330,16,'#c9b79c');T2(win?'Монеты: +'+coinGain:'Нужно набрать '+cfg.goal+' очков',W/2,358,16,'#ffd54a');
+btn(70,380,120,50,'#4a3320');T2('Заново',130,405,18);
+btn(210,380,120,50,win&&lv<NL-1?'#355e3b':'#4a3320');T2(win&&lv<NL-1?'Дальше':'Меню',270,405,18);
+if(win&&lv<NL-1){btn(140,445,120,40,'#4a3320');T2('Меню',200,465,16)}}
+cur()}
+
+const AD=30;
+const SH=[{k:'w',i:1,n:'Дробовик',d:'Картечь бьёт по площади',pr:300},{k:'w',i:2,n:'АК',d:'Автоматический огонь',pr:800},{k:'w',i:3,n:'СВД',d:'Точность, ×2 за яблочко',pr:1500},{k:'u',i:0,n:'Время +5 с',d:'К каждому уровню',pr:[250,500,900]},{k:'u',i:1,n:'Быстрая перезарядка',d:'−15% за уровень',pr:[250,500,900]}];
+const BG=[{a:'#3b2a1d',b:'#1d140d',sh:'#5a3d22'},{a:'#0b1030',b:'#1b2a5a',sh:'#3a4a7a'},{a:'#f2c27a',b:'#c98a4b',sh:'#8a5a2a'},{a:'#12001f',b:'#3b0a5a',sh:'#d500f9'}];
+const TABS=['Оружие','Фоны','Мишени'];
+const SHP=[SH,[{k:'b',i:0,n:'Деревянный',d:'Классический тир',pr:0},{k:'b',i:1,n:'Ночь',d:'Звёздное небо',pr:400},{k:'b',i:2,n:'Пустыня',d:'Жара и солнце',pr:600},{k:'b',i:3,n:'Неон',d:'Сетка в стиле киберпанк',pr:800}],[{k:'s',i:0,n:'Круг',d:'Классика',pr:0},{k:'s',i:1,n:'Квадрат',d:'Угловатые мишени',pr:300},{k:'s',i:2,n:'Звезда',d:'Звёздные мишени',pr:700},{k:'s',i:3,n:'Тарелка',d:'Как в стендовой стрельбе',pr:500}]];
+let shopTab=0;
+
+function cost(s){return s.k=='w'?(save.own[s.i]?0:s.pr):s.k=='u'?(save.up[s.i]>=3?0:s.pr[save.up[s.i]]):s.k=='b'?(save.bo[s.i]?0:s.pr):(save.so[s.i]?0:s.pr)}
+function sel(s){return s.k=='b'?save.b==s.i:s.k=='s'?save.s==s.i:false}
+function pth(r){const k=save.s;g.beginPath();
+if(k==1)g.rect(-r,-r,2*r,2*r);
+else if(k==2){for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,q=i%2?r*.5:r*1.1,x=Math.cos(a)*q,y=Math.sin(a)*q;i?g.lineTo(x,y):g.moveTo(x,y)}g.closePath()}
+else if(k==3)g.ellipse(0,0,r*1.25,r*.65,0,0,7);
+else g.arc(0,0,r,0,7)}
+
+function subTap(){if(inR(140,570,120,50)){sc='menu';return}
+if(sc=='shop'){for(let i=0;i<3;i++)if(inR(14+i*125,66,118,34)){shopTab=i;note='';return}
+SHP[shopTab].forEach((s,n)=>{if(inR(290,116+n*74+11,80,44)){const c=cost(s);
+if(!c){if(s.k=='b')save.b=s.i;else if(s.k=='s')save.s=s.i;else return;persist();click();note='Выбрано: '+s.n;return}
+if(save.coins>=c){save.coins-=c;if(s.k=='w')save.own[s.i]=1;else if(s.k=='u')save.up[s.i]++;else if(s.k=='b'){save.bo[s.i]=1;save.b=s.i}else{save.so[s.i]=1;save.s=s.i}persist();click();note='Куплено: '+s.n}else note='Не хватает монет. Загляни в «Задания»'}})}
+else if(inR(290,132,80,44)){
+    // Вызов рекламы за вознаграждение
+    vkBridge.send("VKWebAppShowNativeAds", { ad_format: "reward" })
+        .then((data) => {
+            if (data.result) {
+                save.coins += AD;
+                persist();
+                note = 'Получено +' + AD + ' монет';
+            } else {
+                note = 'Реклама закрыта до завершения';
+            }
+        })
+        .catch(() => {
+            note = 'Нет доступной рекламы';
+        });
+}}
+
+function drawSub(){T2('Монеты: '+save.coins,W-14,24,18,'#ffd54a','right');
+T2(sc=='shop'?'Магазин':'Задания',W/2,30,26,'#ffd54a');
+if(sc=='shop'){TABS.forEach((t,i)=>{btn(14+i*125,66,118,34,shopTab==i?'#8d5a2b':'#3a2a1b');T2(t,73+i*125,83,14)});
+SHP[shopTab].forEach((s,n)=>{const y=116+n*74,c=cost(s),on=sel(s);btn(20,y,360,66,'#3a2a1b');
+T2(s.n+(s.k=='u'?' ('+save.up[s.i]+'/3)':''),32,y+22,17,'#f4e9d8','left');T2(s.d,32,y+46,12,'#c9b79c','left');
+const lab=c?c:s.k=='w'?'Куплено':s.k=='u'?'Макс':on?'Выбрано':'Выбрать';
+btn(290,y+11,80,44,c?(save.coins>=c?'#355e3b':'#6a3b2b'):(on||s.k=='w'||s.k=='u')?'#241912':'#4a3320');T2(lab,330,y+33,c?17:12,c?'#f4e9d8':on?'#ffd54a':'#8a7a66')})}
+else{btn(20,110,360,84,'#3a2a1b');T2('Посмотреть рекламу',32,136,18,'#f4e9d8','left');T2('+'+AD+' монет',32,168,14,'#ffd54a','left');btn(290,132,80,44,'#355e3b');T2('Смотреть',330,154,14)}
+T2(note,W/2,540,14,'#ffd54a');btn(140,570,120,50,'#4a3320');T2('Назад',200,595,18)}
+
+function pre(i){lv=i;cfg=LC(i);note='';sc='pre'}
+function preTap(){if(inR(40,560,120,50)){sc='menu';return}
+if(inR(210,560,150,50)){start(lv);return}
+for(let i=0;i<4;i++)if(inR(20,130+i*76,360,66)){if(save.own[i]){wi=i;click();note=''}else note='Это оружие можно купить в магазине'}}
+function drawPre(){T2('Уровень '+(lv+1),W/2,32,28,'#ffd54a');T2('Цель: '+cfg.goal+' очков за '+(cfg.time+save.up[0]*5)+' с',W/2,72,15);T2('Выбери оружие: во время уровня сменить нельзя',W/2,104,12,'#c9b79c');
+WP.forEach((w,i)=>{const y=130+i*76,ok=save.own[i];btn(20,y,360,66,i==wi&&ok?'#8d5a2b':ok?'#3a2a1b':'#241912');T2(w.n,32,y+22,18,ok?'#f4e9d8':'#7a6a58','left');T2('Патронов '+w.mag+' · '+(w.auto?'очередь':w.pel?'картечь':'одиночный')+' · перезарядка '+w.rl+' с',32,y+46,12,ok?'#c9b79c':'#5d4f40','left');T2(ok?(i==wi?'Выбрано':''):'🔒',366,y+33,13,'#ffd54a','right')});
+T2(note,W/2,538,13,'#ffd54a');btn(40,560,120,50,'#4a3320');T2('Назад',100,585,18);btn(210,560,150,50,'#355e3b');T2('Старт',285,585,22)}
+
+// Вызов нативного лидерборда ВК
+function openLB(){
+    const totalScore = (save.best || []).reduce((a, b) => a + (b || 0), 0);
+    vkBridge.send("VKWebAppShowLeaderBoardBox", { 
+        user_result: totalScore 
+    }).catch(e => {
+        console.log("Ошибка вызова лидерборда", e);
+    });
+}
+
+function cur(){const y=sc=='play'?my-rec:my;g.strokeStyle='#ffeb3b';g.lineWidth=2;g.beginPath();g.arc(mx,y,13,0,7);g.moveTo(mx-20,y);g.lineTo(mx-6,y);g.moveTo(mx+6,y);g.lineTo(mx+20,y);g.moveTo(mx,y-20);g.lineTo(mx,y-6);g.moveTo(mx,y+6);g.lineTo(mx,y+20);g.stroke();
+g.fillStyle='#ff1744';g.fillRect(mx-1.5,y-1.5,3,3)}
+
+/* ---- input ---- */
+function pos(e){const r=cv.getBoundingClientRect();mx=(e.clientX-r.left)*W/r.width;my=(e.clientY-r.top)*H/r.height}
+const inR=(x,y,w,h)=>mx>=x&&mx<=x+w&&my>=y&&my<=y+h;
+
+cv.addEventListener('pointerdown',e=>{e.preventDefault();ainit();pos(e);down=true;
+if(sc=='menu'){for(let k=0;k<10;k++){const i=menuPage*10+k;if(inR(30+(k%5)*70,240+Math.floor(k/5)*85,60,70)&&unl(i))pre(i)}if(inR(30,408,70,36)&&menuPage>0)menuPage--;if(inR(300,408,70,36)&&menuPage<NL/10-1)menuPage++;if(inR(30,470,160,56)){sc='shop';note=''}if(inR(210,470,160,56)){sc='tasks';note=''}if(inR(30,534,340,48))openLB();}
+else if(sc=='pre'){preTap()}
+else if(sc=='shop'||sc=='tasks'){subTap()}
+else if(sc=='end'){if(inR(70,380,120,50))pre(lv);else if(inR(210,380,120,50)){if(win&&lv<NL-1)pre(lv+1);else sc='menu'}else if(win&&lv<NL-1&&inR(140,445,120,40))sc='menu'}
+else{if(my>=588){if(inR(100,596,290,36))reload()}else shoot()}});
+cv.addEventListener('pointermove',e=>{e.preventDefault();pos(e)});
+addEventListener('pointerup',()=>down=false);addEventListener('pointercancel',()=>down=false);
+addEventListener('keydown',e=>{if(e.key=='r'||e.key=='к')reload()});
+let last=performance.now();
+function loop(n){const dt=Math.min(.05,(n-last)/1000);last=n;update(dt);draw();requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+</script></body></html>
