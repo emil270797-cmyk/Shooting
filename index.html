@@ -102,7 +102,7 @@ function end(){
     
     // Вызов Task-рекламы Adsgram после уровня
     if (window.Adsgram) {
-        const taskAd = window.Adsgram.init({ blockId: "твой_id_блока_task" });
+        const taskAd = window.Adsgram.init({ blockId: "57849" });
         taskAd.show().then(() => {
             sc = 'end';
         }).catch(() => {
@@ -197,7 +197,7 @@ if(save.coins>=c){save.coins-=c;if(s.k=='w')save.own[s.i]=1;else if(s.k=='u')sav
 else if(inR(290,132,80,44)){
     // Вызов Rewarded рекламы Adsgram за вознаграждение
     if (window.Adsgram) {
-        const rewardAd = window.Adsgram.init({ blockId: "твой_id_блока_reward" });
+        const rewardAd = window.Adsgram.init({ blockId: "57850" });
         rewardAd.show().then((result) => {
             save.coins += AD;
             persist();
