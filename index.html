@@ -150,7 +150,7 @@ g.fillStyle='#2b1d12';g.fillRect(0,588,W,52);
 T2(WP[wi].n,14,614,16,'#f4e9d8','left');
 btn(100,596,290,36,rl>0?'#7a3b2b':'#355e3b');T2(rl>0?'Перезарядка...':'Патроны '+ammo+'/'+WP[wi].mag+' · тап — перезарядка',245,614,13);
 if(rl>0){g.fillStyle='#ffd54a';g.fillRect(10,584,Math.max(0,1-rl/(WP[wi].rl*(1-.15*save.up[1])))*380,3)}
-btn(10, 60, 70, 30, '#4a3320');T2('В меню', 45, 75,13, '#f4e9d8');}
+btn(10, 60, 70, 30, '#4a3320');T2('В меню', 45, 75, 13, '#f4e9d8');}
 function draw(){g.setTransform(1,0,0,1,0,0);bg();if(sc=='pre'){drawPre();cur();return}if(sc=='shop'||sc=='tasks'){drawSub();cur();return}
 if(sc=='menu'){T2('ТИР',W/2,90,56,'#ffd54a');T2('Стреляй по мишеням, не трогай синих',W/2,140,14,'#c9b79c');
 T2('Выбери уровень',W/2,200,18);
@@ -229,7 +229,6 @@ function drawPre(){T2('Уровень '+(lv+1),W/2,32,28,'#ffd54a');T2('Цель
 WP.forEach((w,i)=>{const y=130+i*76,ok=save.own[i];btn(20,y,360,66,i==wi&&ok?'#8d5a2b':ok?'#3a2a1b':'#241912');T2(w.n,32,y+22,18,ok?'#f4e9d8':'#7a6a58','left');T2('Патронов '+w.mag+' · '+(w.auto?'очередь':w.pel?'картечь':'одиночный')+' · перезарядка '+w.rl+' с',32,y+46,12,ok?'#c9b79c':'#5d4f40','left');T2(ok?(i==wi?'Выбрано':''):'🔒',366,y+33,13,'#ffd54a','right')});
 T2(note,W/2,538,13,'#ffd54a');btn(40,560,120,50,'#4a3320');T2('Назад',100,585,18);btn(210,560,150,50,'#355e3b');T2('Старт',285,585,22)}
 
-// Рейтинги в Telegram не имеют нативного UI компонента
 function openLB(){
     if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.showAlert) {
         Telegram.WebApp.showAlert('Рейтинги находятся в разработке!');
@@ -251,8 +250,6 @@ else if(sc=='pre'){preTap()}
 else if(sc=='shop'||sc=='tasks'){subTap()}
 else if(sc=='end'){if(inR(70,380,120,50))pre(lv);else if(inR(210,380,120,50)){if(win&&lv<NL-1)pre(lv+1);else sc='menu'}else if(win&&lv<NL-1&&inR(140,445,120,40))sc='menu'}
 else{if(inR(10, 60, 70, 30)){sc='menu';return}if(my>=588){if(inR(100,596,290,36))reload()}else shoot()}});
-    
-else{if(my>=588){if(inR(100,596,290,36))reload()}else shoot()}});
 cv.addEventListener('pointermove',e=>{e.preventDefault();pos(e)});
 addEventListener('pointerup',()=>down=false);addEventListener('pointercancel',()=>down=false);
 addEventListener('keydown',e=>{if(e.key=='r'||e.key=='к')reload()});
